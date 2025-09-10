@@ -164,35 +164,53 @@ func patternNodesToRadixNodes[Value any](patternNodes []PatternNode) (head, last
 
 func (t *RadixTree[Processor, Value]) Search(p string, params Params) (*RadixNode[Value], Params, error) {
 	n := t.node
+	var traceInfo traceBackInfo[Value]
+	traceInfo.Params = params
 	for {
 		if n == nil {
-			return nil, params, nil
+			if n = traceInfo.Pop(); n == nil {
+				return nil, params, nil
+			}
 		}
 		if n.patternNode.ParamType {
 			param := t.processor.GetParam(n.patternNode, p)
-			params = append(params, param)
+			traceInfo.Params = append(traceInfo.Params, param)
 			p = p[len(param.Value):]
 		} else {
 			nodeLen := len(n.patternNode.NodeVal)
 			if nodeLen > len(p) {
-				return nil, params, nil
+				n = traceInfo.Pop()
+				if n == nil {
+					return nil, params, nil
+				}
+				continue
 			}
 			if n.patternNode.NodeVal != p[0:nodeLen] {
-				return nil, params, nil
+				n = traceInfo.Pop()
+				if n == nil {
+					return nil, params, nil
+				}
+				continue
 			}
 			p = p[nodeLen:]
 		}
 		if p == "" {
 			if n.valEnabled {
-				return n, params, nil
+				return n, traceInfo.Params, nil
 			} else {
-				return nil, params, nil
+				n = traceInfo.Pop()
+				if n == nil {
+					return nil, params, nil
+				}
+				continue
 			}
 		}
 
-		if n.paramChild != nil {
+		if traceInfo.MatchParamNode {
 			n = n.paramChild
+			traceInfo.MatchParamNode = false
 		} else {
+			traceInfo.Push(n)
 			n = n.children[p[0]]
 		}
 	}
@@ -218,4 +236,50 @@ func longestCommonPrefix(s1, s2 string) string {
 	}
 
 	return s1[:minLen]
+}
+
+type backTraceNode[Value any] struct {
+	ParamSize int
+	Node      *RadixNode[Value]
+}
+
+type backTraceNodes[Value any] []backTraceNode[Value]
+
+func (t backTraceNodes[Value]) Push(n *RadixNode[Value], size int) backTraceNodes[Value] {
+	return append(t, backTraceNode[Value]{
+		ParamSize: size,
+		Node:      n,
+	})
+}
+
+func (t backTraceNodes[Value]) Pop(params Params) (backTraceNodes[Value], *RadixNode[Value], Params) {
+	if len(t) == 0 {
+		return nil, nil, params
+	}
+	lastNode := t[len(t)-1]
+	return t[0 : len(t)-1], lastNode.Node, params[0:lastNode.ParamSize]
+}
+
+type traceBackInfo[Value any] struct {
+	MatchParamNode bool
+	Params         Params
+	TraceNodes     backTraceNodes[Value]
+}
+
+func (info *traceBackInfo[Value]) Push(n *RadixNode[Value]) {
+	info.TraceNodes = append(info.TraceNodes, backTraceNode[Value]{
+		ParamSize: len(info.Params),
+		Node:      n,
+	})
+}
+
+func (info *traceBackInfo[Value]) Pop() *RadixNode[Value] {
+	if len(info.TraceNodes) == 0 {
+		return nil
+	}
+	info.MatchParamNode = true
+	last := info.TraceNodes[len(info.TraceNodes)-1]
+	info.Params = info.Params[0:last.ParamSize]
+	info.TraceNodes = info.TraceNodes[0 : len(info.TraceNodes)-1]
+	return last.Node
 }
