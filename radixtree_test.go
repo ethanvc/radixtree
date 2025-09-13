@@ -28,4 +28,9 @@ func TestRadixTree_1(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, len(params))
 	require.Equal(t, "/abc/:id", n.pattern)
+
+	n, params, err = tree.Search("/abc/bcd", nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, len(params))
+	require.Equal(t, "/abc/bcd", n.pattern)
 }
